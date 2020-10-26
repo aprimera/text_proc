@@ -8,11 +8,20 @@ from nltk.stem.snowball import SnowballStemmer
 from nltk.stem import WordNetLemmatizer
 from tempfile import NamedTemporaryFile
 import webbrowser
+import re
 
 
 def file_reader(file):
-    ''' Provide the location of the ascii file
-        The function returns the full text
+    '''Reads an ASCII file and returns its text
+    Parameters
+    ----------
+    file: str 
+        Provide the location of the file
+    
+    Returs
+    ----------
+    str
+        All text read with UTF8 enconding
     '''
     with open(file, 'r', encoding="utf8") as f:
         text = f.read()
@@ -20,8 +29,26 @@ def file_reader(file):
 
 
 def text_processor(text, add_stop_words=[], stemming=False, lemmatising=False):
-    '''
+    '''Process a text in a string object using the nltk library with some options
+    Parameters
+    ----------
+    text: str 
+        Text to be processed
+    add_stop_words: list
+        List of strings to be added to the nltk.corpus.stopwords
+    stemming: bool
+        Whether the Stemming option in nltk should be used
+    lemmatising: bool
+        Whether the Lemmatizer in nltk should be used
     
+    Returs
+    ----------
+    set_words: list
+        List of unique different words found in the text
+    word: list
+        List of all words found in the text in the order found
+    sentences: list
+        List of all sentences corresponding to the found word
     '''
     stop_words = stopwords.words('english')
     tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
@@ -43,18 +70,38 @@ def text_processor(text, add_stop_words=[], stemming=False, lemmatising=False):
 
 
 def data_frame_compiler(set_words, words, sentences, files):
+    '''Generates a DataFrame from the list of words, sentences and files.
+        HTML markdown to list files and sentences is included
+    Parameters
+    ----------
+    set_words: list
+        List of unique different words found in the text
+    word: list
+        List of all words found in the text in the order found
+    sentences: list
+        List of all sentences corresponding to the found word
+    files: list
+        List of all files where words were found
+    
+    Returs
+    ----------
+    df: pandas.DataFrame
+        Returns a dataframe with a summary of the words found and the sentence location
+    '''
     df = pd.DataFrame()
     word_count = []
     sentences_report = []
     files_list = []
     for word in set_words:
-        all_sentences = ''
-        all_files = ''
+        all_sentences = '<ul>'
+        all_files = '<ul>'
         for i, sentence in enumerate(sentences):
             if word in sentence.lower():
-                all_sentences = all_sentences + sentence + '\n\n' 
+                all_sentences = all_sentences + '<li>' + sentence + '</li>'# '\n\n' 
                 if files[i] not in all_files:
-                    all_files = all_files + files[i] + ', '
+                    all_files = all_files + '<li>' + files[i] + '</li>'
+        all_sentences = all_sentences + '</ul>'
+        all_files = all_files + '</ul>'
         word_count.append(words.count(word))
         sentences_report.append(sentence_highlighter(all_sentences, word))  
         #sentences_report.append(all_sentences) 
@@ -63,61 +110,96 @@ def data_frame_compiler(set_words, words, sentences, files):
     df['count'] = word_count
     df['files'] = files_list
     df['sentences'] = sentences_report
-    df.reset_index(drop=True, inplace=True)
+    df.set_index('words', inplace=True)
+    #df.reset_index(drop=True, inplace=True)
     df.sort_values('count', ascending=False, inplace=True)
     return df
 
-
-class color:
-   PURPLE = '\033[95m'
-   CYAN = '\033[96m'
-   DARKCYAN = '\033[36m'
-   BLUE = '\033[94m'
-   GREEN = '\033[92m'
-   YELLOW = '\033[93m'
-   RED = '\033[91m'
-   BOLD = '\033[1m'
-   UNDERLINE = '\033[4m'
-   END = '\033[0m'
-
     
 def sentence_highlighter(sentence, word):
+    '''Adds additional HTML markup to highlight some words
+    Parameters
+    ----------
+    sentence: str
+        Sentence where word is to be found 
+    word: str
+        Word to be highlighted in the sentence
+    Returs
+    ----------
+    sentence: str
+        New sentence string with highlighted format
+    '''
+    regex = re.compile(re.escape(word), re.IGNORECASE)
+    sentence = regex.sub("<b>" + word + "</b>", sentence)
     sentence = sentence.replace('\n', '<br>')
-    #sentence = sentence.replace('\', '')
-    sentence = sentence.replace(word, "<b>" + word + "</b>")
-    #sentence = sentence.replace(word, color.BOLD + color.UNDERLINE + word + color.END)
+    #sentence = sentence.replace(word, "<b>" + word + "</b>")
     return sentence
 
 
 def df_html(df):
+    '''Generates a HTML file with a table from dataframe
+    Parameters
+    ----------
+    df: pandas.DataFrame
+        DataFrame with words and count columns with html markup in the strings objects  
+    Returs
+    ----------
+    df_html: str
+        String in HTML markup format
+    '''
     base_html = """
     <!doctype html>
     <html>
         <head>
             <meta http-equiv="Content-type" content="text/html; charset=utf-8">
             <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.2/jquery.min.js"></script>
-            <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.16/css/jquery.dataTables.css">
-            <script type="text/javascript" src="https://cdn.datatables.net/1.10.16/js/jquery.dataTables.js"></script>
+            <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.22/css/jquery.dataTables.css">
+            <script type="text/javascript" src="https://cdn.datatables.net/1.10.22/js/jquery.dataTables.js"></script>
         </head>
         <body>
-            %s<script type="text/javascript">
+            %s
+            <script type="text/javascript">
                 $(document).ready(function(){$('table').DataTable({"pageLength": 5});});
             </script>
         </body>
     </html>
     """
     df_html = df.to_html()
+    
     return base_html % df_html
 
 
-def df_window(df):
-    with NamedTemporaryFile(delete=False, suffix='.html', mode='w+') as f:
-        f.write(df_html(df))
+def df_window(df, filename):       
+    '''Generates and displays a html from a dataframe 
+    Parameters
+    ----------
+    df: pandas.DataFrame
+        DataFrame with report of words found in file 
+    '''
+    with open(filename, encoding="utf8", mode='w+') as f:
+        html_text = df_html(df)
+        #print(html_text)
+        html_text = html_text.replace('&lt;','<')
+        html_text = html_text.replace('&gt;','>')
+        html_text = html_text.replace('"', r'"')
+        html_text = html_text.replace("'", r"'")
+        html_text = html_text.replace("`", r"`")
+        f.write(html_text)
     webbrowser.open(f.name)
     
 
 def words_for_cloud(df):
-    w = df['words'].tolist()
+    '''Generates text for wordcloud library
+    Parameters
+    ----------
+    df: pandas.DataFrame
+        DataFrame with words and count columns   
+    Returs
+    ----------
+    text: str
+        Text for wordcloud processor
+    '''
+    w = df.index.tolist()
     wc = df['count'].tolist()
     text = ''
     for i in range(len(w)):
